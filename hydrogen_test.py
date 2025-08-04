@@ -15,20 +15,21 @@ eps0 = c.eps0.to(u.F/u.m).value  # Vacuum permittivity in SI
 # Domain: 0 to 20 Bohr radii
 r_max = 20 * a0
 r_min = 1e-4*a0  # Avoid zero to prevent singularity in potential
-r = np.linspace(r_min, r_max, 50)  # Avoid r=0 for numerical stability
+r = np.linspace(r_min, r_max, 50)  #For l=0, we start including r=0.
 
 # Hydrogen atom radial equation for general l
 # Schrödinger equation in radial form
 # d^2u/dr^2 + (2m/hbar^2)(V-E)u - l(l+1)/r^2 * u = 0
 # where V = -e^2/(4πε₀r), 
 # and u = r * R(r), with R(r) being the radial wavefunction.
+# The potential V is singular at r=0, but the singular
+# term S doesn't seem to quite work.
 
 def schrodinger_general(r, y, E, l):
     psi = y[0]
     dpsi = y[1]
-    V = -e**2 / (4 * np.pi * eps0 * r)  # Potential in Joules (SI units)
-    centrifugal = l * (l + 1) * hbar**2 / (2 * m_e * r**2)  # Centrifugal term in Joules
-    d2psi = 2 * m_e / hbar**2 * (V - E) * psi + l * (l + 1) / r**2 * psi
+    V = -e**2 / (4 * np.pi * eps0 * r)
+    d2psi = 2 * m_e / hbar**2 * (V-E) * psi + l * (l + 1) / r**2 * psi    
     return np.vstack((dpsi, d2psi))
 
 # Boundary conditions for general l: u(0)=0, u(r_max)=0
@@ -36,7 +37,7 @@ def bc_general(ya, yb, E, l):
 	if l==0:
 		return np.array([ya[0], yb[0], ya[1]-1])
 	else:
-	    return np.array([ya[0], yb[0], ya[1]-r_min/r_max*5])
+	    return np.array([ya[0], yb[0], yb[1]-1])
 
 # Initial guess for wavefunction with orbital angular momentum l
 def guess_general(r, l, n):
@@ -44,7 +45,7 @@ def guess_general(r, l, n):
     if l == 0:
         psi = r * np.exp(-r / (n * a0))
     elif l == 1:
-        psi = r * np.exp(-r /(n*a0)) * np.sin(r / r_max * np.pi * n)
+        psi = r * (-1)**n * np.sin(r / r_max * np.pi * n)/np.pi/n #np.exp(-r /(n*a0))
     else:
         raise UserWarning
     dpsi = np.gradient(psi, r)
@@ -61,7 +62,7 @@ def find_eigenvalues(l, n_max=10):
     n_start = l + 1
     
     for n in range(n_start, n_start + n_max):
-        E_guess = (n-1 -13.6 / n**2) * u.eV.to(u.J)  # Convert to Joules
+        E_guess = (2.5*n - 11) * u.eV.to(u.J)  # Convert to Joules
         
         try:
             sol = solve_bvp(lambda r, y, E: schrodinger_general(r, y, E, l), 
@@ -107,6 +108,7 @@ plt.legend()
 
 # Now solve for the first 10 l=1, m=0 modes
 print("\nFinding l=1, m=0 modes:")
+r = np.linspace(r_min, r_max, 100)
 l1_energies, l1_solutions = find_eigenvalues(l=1, n_max=8)
 
 # Plot first few l=1 modes
