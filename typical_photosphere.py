@@ -44,16 +44,21 @@ Hneq3 = 13.6*u.eV*(1-1/9)
 Neneq2 = c.c*c.h*134459*u.cm**(-1)
 Heneq2 = c.c*c.h*159855*u.cm**(-1)
 
-Teff = np.linspace(4000,15000,50)
+Teff = np.linspace(3000,20000,50)
 Tphot = Teff * 0.85
 expEkT = np.exp(-10*u.eV/(c.k_B*Tphot*u.K))
 expEkT0 = np.exp(-10*u.eV/(c.k_B*9000*u.K))
 chi_mass = (3e1*expEkT/(expEkT + expEkT0) + 3e-2)*u.cm**2/u.g
+
+#An approximation for the main sequence mass (covered in ASTR2013?)
 M_Msun = (Teff/5772)**(4/3)
+
+# Gravity, scaled by the solar value, noting that R \propto M
 g = (2.74e4*u.cm/u.s**2) / (M_Msun)
 
 #Now the number density as a function of photospheric temperature
 N0 = (g/chi_mass/c.k_B/(Teff*u.K)).cgs
+
 #Convert to density
 rho0 = (N0*u.u).cgs
 
@@ -85,10 +90,11 @@ wave_debroglie = np.sqrt(c.h**2/2/np.pi/c.m_e/c.k_B/(Teff*u.K)).cgs.value
 n_Hm = ns_T[:,0]*n_e_T*wave_debroglie**3/2*1/2*np.exp(-Eion_Hm/c.k_B/(Teff*u.K))
 n_Hneq3 = 9*ns_T[:,0] * np.exp(-Hneq3/c.k_B/(Teff*u.K))
 n_Hneq2 = 4*ns_T[:,0] * np.exp(-Hneq2/c.k_B/(Teff*u.K))
-n_Neneq2 = 12*ns_T[:,14] * np.exp(-Neneq2/c.k_B/(Teff*u.K))
 n_Heneq2 = 12*ns_T[:,2] * np.exp(-Heneq2/c.k_B/(Teff*u.K))
+n_Neneq2 = 12*ns_T[:,14] * np.exp(-Neneq2/c.k_B/(Teff*u.K))
 
 #'H', 'He',   'C',   'N',   'O',   'Ne',  'Na',  'Mg',  'Si',  'S',   'K',   'Ca',  'Fe']
+#A plot of the number densities of the neutral species.
 n_p = ns_T[:,0] + ns_T[:,1]
 plt.figure(1)
 plt.clf()
@@ -100,11 +106,10 @@ ax.semilogy(Teff, ns_T[:,0]/n_p, label='HI')
 ax.axis([4500,15000,10**(-10.8),10**0.5])
 plt.ylabel(r'N/N$_H$')
 plt.xlabel(r'T$_{\rm eff}$')
-#plt.legend()
 labelLines(ax.get_lines(), zorder=2.5, **csfont)
 plt.tight_layout()
 
-
+#A plot of the number density of ionized species.
 plt.figure(2)
 plt.clf()
 ax = plt.axes()
@@ -115,22 +120,24 @@ for i in range(nelt-1):
 ax.axis([4500,15000,3e-8,.1])
 plt.ylabel(r'N/N$_H$')
 plt.xlabel(r'T$_{\rm eff}$')
-#plt.legend()
 labelLines(ax.get_lines(), zorder=2.5, **csfont)
 plt.tight_layout()
 
 #Make a plot of the model continuum opacity.
 plt.figure(3)
 plt.clf()
+#Number densities in cgs units multiplied by the cross sections in cgs units.
 chi_mass2 = (n_Hneq3*5e-18*u.cm**(-1)+ n_Hm*3.1e-17*u.cm**(-1) + n_e_T*6.65e-25*u.cm**(-1))/rho0 
-plt.semilogy(Teff, chi_mass2.cgs.value)
-plt.semilogy(Teff, chi_mass.cgs.value)
+plt.semilogy(Teff, chi_mass2.cgs.value, label='Grey Opacity of H, H-, e-')
+plt.semilogy(Teff, chi_mass.cgs.value, label='Simple formula above')
 plt.axis([4000,14000,1e-2,40])
 plt.xlabel(r'T$_{\rm eff}$ (K)')
 plt.ylabel(r'$\bar{\chi}$ (cm$^2$/g)')
 plt.tight_layout()
+plt.legend()
 
-
+# Now a plot of number densities of key elements and excited states that
+# contribute to continuum opacity.
 plt.figure(5)
 plt.clf()
 ax = plt.axes()
@@ -146,7 +153,7 @@ ax.semilogy(Teff, n_Heneq2/n_p, 'k:', label='HeI n=2')
 ax.semilogy(Teff, n_e_T/n_p, 'm:', label='e-')
 ax.semilogy(Teff, n_e_T/n_p/1e7, 'm--', label=r'e- /10^7 ')
 
-ax.axis([4500,14000,10**(-10.8),10**0.5])
+ax.axis([3000,20000,10**(-10.8),10**0.5])
 plt.ylabel(r'N/N$_H$')
 plt.xlabel(r'T$_{\rm eff}$')
 #plt.legend()
