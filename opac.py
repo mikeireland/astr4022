@@ -3,7 +3,6 @@ import astropy.constants as c
 import numpy as np
 import astropy.io.fits as pyfits
 import matplotlib.pyplot as plt
-from scipy.interpolate import RegularGridInterpolator
 plt.ion()
 
 """
@@ -109,50 +108,56 @@ def Hff(nu, T):
 	#Approximate a Gaunt factor of 1.0!
 	#FIXME : Remove the approximation
 	return Hff_const /nu**3/np.sqrt(T)
-	
+
+def kappa_cont(nu, T, nHI, nHII, nHm, ne):
+	"""Compute the continuum opacity in cgs units as a function of
+	temperature in K and number densities.
+	"""
+	kappa = nHI * Hbf(nu, T) + nHII * ne * Hff(nu, T) + \
+			nHm * Hmbf(nu, T) + nHI * ne * Hmff(nu, T)
+	return kappa
+
 if __name__=="__main__":
-	#Lets compute a rosseland mean opacity!
-	if True:
-		#Create a grid of frequencies from 30 nm to 30 microns.
-		dnu = 1e13
-		plt.clf()
-		nu = dnu*np.arange(1000) + dnu/2
-		f = pyfits.open('rho_Ui_mu_ns_ne.fits')
-		h = f[0].header
-		natoms = f['ns'].data.shape[2]//3
-		Ts = h['CRVAL1'] + np.arange(h['NAXIS1'])*h['CDELT1']
-		Ps_log10 = h['CRVAL2'] + np.arange(h['NAXIS2'])*h['CDELT2']
-		kappa_bar_Planck = np.zeros_like(f[0].data)
-		kappa_bar_Ross = np.zeros_like(f[0].data)
-		for i, P_log10 in enumerate(Ps_log10):
-			for j, T in enumerate(Ts):
-				nHI = f['ns'].data[i,j,0]
-				nHII = f['ns'].data[i,j,1]
-				nHm = f['ns'].data[i,j,2]
-				ne = f['n_e'].data[i,j]
-				#Compute the volume-weighted absorption coefficient
-				kappa = nHI * Hbf(nu,T)  + nHII * ne * Hff(nu,T) + \
-					    nHm * Hmbf(nu,T) + nHI  * ne * Hmff(nu,T)
-				#Now compute the Rosseland and Planck means.
-				Bnu = nu**3/(np.exp(h_kB_cgs*nu/T)-1)
-				dBnu = nu**4 * np.exp(h_kB_cgs*nu/T)/(np.exp(h_kB_cgs*nu/T)-1)**2
-				kappa_bar_Planck[i,j] = np.sum(kappa*Bnu)/np.sum(Bnu)/f[0].data[i,j]
-				kappa_bar_Ross[i,j] = 1/(np.sum(dBnu/kappa)/np.sum(dBnu))/f[0].data[i,j]
-#				if (i==30): #This is log_10(P)=3.5 - similar to solar photosphere.
-#					plt.loglog(3e8/nu, kappa/f[0].data[i,j])
-#					plt.pause(.5)
-#					print(T)
-#					if (j==20):
-#						import pdb; pdb.set_trace()
-		hdu1 = pyfits.PrimaryHDU(kappa_bar_Ross)
-		hdu1.header['CRVAL1'] = Ts[0]
-		hdu1.header['CDELT1'] = Ts[1]-Ts[0]
-		hdu1.header['CTYPE1'] = 'Temperature [K]'
-		hdu1.header['CRVAL2'] = Ps_log10[0]
-		hdu1.header['CDELT2'] = Ps_log10[1]-Ps_log10[0]
-		hdu1.header['CTYPE2'] = 'log10(pressure) [dyne/cm^2]'
-		hdu1.header['EXTNAME'] = 'kappa_Ross [cm**2/g]'
-		hdu2 = pyfits.ImageHDU(kappa_bar_Planck)
-		hdu2.header['EXTNAME'] = 'kappa_Planck [cm**2/g]'
-		hdulist = pyfits.HDUList([hdu1, hdu2])
-		hdulist.writeto('Ross_Planck_opac.fits', overwrite=True)
+	#Lets compute a Rosseland mean opacity!
+	#Create a grid of frequencies from 30 nm to 30 microns.
+	dnu = 1e13
+	plt.clf()
+	nu = dnu*np.arange(1000) + dnu/2
+	f = pyfits.open('rho_Ui_mu_ns_ne.fits')
+	h = f[0].header
+	natoms = f['ns'].data.shape[2]//3
+	Ts = h['CRVAL1'] + np.arange(h['NAXIS1'])*h['CDELT1']
+	Ps_log10 = h['CRVAL2'] + np.arange(h['NAXIS2'])*h['CDELT2']
+	kappa_bar_Planck = np.zeros_like(f[0].data)
+	kappa_bar_Ross = np.zeros_like(f[0].data)
+	for i, P_log10 in enumerate(Ps_log10):
+		for j, T in enumerate(Ts):
+			nHI = f['ns'].data[i,j,0]
+			nHII = f['ns'].data[i,j,1]
+			nHm = f['ns'].data[i,j,2]
+			ne = f['n_e'].data[i,j]
+			#Compute the volume-weighted absorption coefficient
+			kappa = kappa_cont(nu, T, nHI, nHII, nHm, ne)
+			#Now compute the Rosseland and Planck means.
+			Bnu = nu**3/(np.exp(h_kB_cgs*nu/T)-1)
+			dBnu = nu**4 * np.exp(h_kB_cgs*nu/T)/(np.exp(h_kB_cgs*nu/T)-1)**2
+			kappa_bar_Planck[i,j] = np.sum(kappa*Bnu)/np.sum(Bnu)/f[0].data[i,j]
+			kappa_bar_Ross[i,j] = 1/(np.sum(dBnu/kappa)/np.sum(dBnu))/f[0].data[i,j]
+			if (i==30): #This is log_10(P)=3.5 - similar to solar photosphere.
+				if ((j < 18) & (j % 2 == 0)):
+					plt.loglog(3e8/nu, kappa/f[0].data[i,j], label=f'T={T}K')
+	hdu1 = pyfits.PrimaryHDU(kappa_bar_Ross)
+	hdu1.header['CRVAL1'] = Ts[0]
+	hdu1.header['CDELT1'] = Ts[1]-Ts[0]
+	hdu1.header['CTYPE1'] = 'Temperature [K]'
+	hdu1.header['CRVAL2'] = Ps_log10[0]
+	hdu1.header['CDELT2'] = Ps_log10[1]-Ps_log10[0]
+	hdu1.header['CTYPE2'] = 'log10(pressure) [dyne/cm^2]'
+	hdu1.header['EXTNAME'] = 'kappa_Ross [cm**2/g]'
+	hdu2 = pyfits.ImageHDU(kappa_bar_Planck)
+	hdu2.header['EXTNAME'] = 'kappa_Planck [cm**2/g]'
+	hdulist = pyfits.HDUList([hdu1, hdu2])
+	hdulist.writeto('Ross_Planck_opac.fits', overwrite=True)
+	plt.legend()
+	plt.xlabel('Wavelength [m]')
+	plt.ylabel(r'$\kappa_R$ [cm$^2$/g]')
