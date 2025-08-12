@@ -19,10 +19,15 @@ import astropy.io.fits as pyfits
 import matplotlib.pyplot as plt
 import opac
 from scipy.special import expn
+from strontium_barium import *
 plt.ion()
 
 Teff = 5777 # K 
 g = 27400   # cm/s^2
+
+# Set to 1.3 to limit T due to the onset of convection.
+# If set to 2.0, there is no effect.
+convective_cutoff = 2.0
 
 # Load the opacity table for Rosseland mean.
 f_opac = pyfits.open('Ross_Planck_opac.fits')
@@ -55,10 +60,12 @@ def dPdtau(_, P, T):
 # Starting from the lowest value of log(P), integrate P using solve_ivp
 #solve_ivp(fun, t_span, y0, method='RK45', t_eval=None, dense_output=False, events=None, vectorized=False, args=None, **options)
 P0 = 10**(Ps_log10[0]) # Initial pressure in dyn/cm^2
-tau_grid = np.concatenate((np.arange(3)/3*1e-6,np.logspace(-6,1,50)))
+tau_grid = np.concatenate((np.arange(3)/3*1e-8,np.logspace(-8,1,60)))
 sol = solve_ivp(dPdtau, [0, 10], [P0], args=(Teff,), t_eval=tau_grid, method='RK45')
 Ps = sol.y[0]
 Ts = T_tau(tau_grid, Teff)
+# Artificially cut the deep layer temperature due to convection.
+Ts = np.minimum(Ts,convective_cutoff*Teff)
 
 # Load the equation of state
 f_eos = pyfits.open('rho_Ui_mu_ns_ne.fits')
@@ -95,9 +102,10 @@ def Blambda_SI(wave_um, T):
     """
     Planck function in cgs units.
     """
-    return 2*np.pi*planck_C1/wave_um**5/(np.exp(planck_C2/wave_um/T)-1)
+    return planck_C1/wave_um**5/(np.exp(planck_C2/wave_um/T)-1)
 
-H = np.zeros(len(wave))  # Initialize H array
+print("Computing continuum spectrum")
+H = np.zeros(len(wave))  # Initialize H array)
 # Compute the flux for each wavelength
 for i, w in enumerate(wave):
     # Compute the opacity at this wavelength
@@ -110,11 +118,46 @@ for i, w in enumerate(wave):
 
 # Plot the flux and the blackbody approximation
 # So far it isn't great... why?
+plt.figure(1)
 plt.clf()
-plt.plot(wave, H, label='Flux')
-plt.plot(wave, Blambda_SI(wave.to(u.um).value, Teff)/4, label='Blackbody')
+plt.plot(wave, 4*np.pi*H /1e6, label='Flux')
+plt.plot(wave, np.pi*Blambda_SI(wave.to(u.um).value, Teff) / 1e6, label='Blackbody')
 plt.xlabel('Wavelength (nm)')
-plt.ylabel('Flux (erg/cm^2/s/um)')
+plt.ylabel(r'Flux (W/m$^2$/$\mu$m)')
 plt.legend()
 plt.show()
 
+# Now lets compute the line profile of the Strontium lines
+wave = np.linspace(405,425,10000) * u.nm
+print("computing Line Spectrum")
+H_line = np.zeros(len(wave))  # Initialize H_line array
+# Compute the line profile for each wavelength
+for i, w in enumerate(wave):
+    # Compute the continuum opacity at this wavelength
+    kappa_nu_bars = opac.kappa_cont((c.c/w).to(u.Hz).value, Teff, nHIs, nHIIs, nHms, nes)/rhos
+
+    # Add in the line opacity. Approximate n_H=nHIs, and the abundance of
+    # Strontium with respect to Hydrogen is 10**(2.83-12)
+    # Dopper velocity is sqrt(kT)/mass. Lets say 2 km/s once micro-turbulence is added.
+    for line_wave, ss in zip([421.552, 407.771] * u.nm, sigma_scaled):
+        #Similar to lecture slides, but with wavelength rathe than frequency.
+        line_width_nm = (2*u.km/u.s / c.c) * line_wave
+        #Normalise correctly. 
+        line_profile = (line_wave/line_width_nm)*(1/np.sqrt(np.pi))* \
+            np.exp(-(w - line_wave)**2 / line_width_nm**2) 
+        kappa_line = (10**(2.83-12) * nHIs * ss).to(u.cm**2).value * line_profile
+        kappa_nu_bars += kappa_line/rhos
+
+    # Now we need S(tau_nu), i.e. B(tau_nu(tau))
+    tau_nu  = cumulative_trapezoid(kappa_nu_bars/kappa_bars, x=tau_grid, initial=0)
+    wave_um = w.to(u.um).value
+    H_line[i] = 0.5*np.trapz(Blambda_SI(wave_um, Ts) * expn(2, tau_nu), x=tau_nu)
+
+#Plot this
+plt.figure(2)
+plt.clf()
+plt.plot(wave, 4*np.pi*H_line / 1e6, label='Flux')
+plt.xlabel('Wavelength (nm)')
+plt.ylabel(r'Flux (W/m$^2$/$\mu$m)')
+plt.legend()
+plt.show()
