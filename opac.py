@@ -1,8 +1,11 @@
 import astropy.units as u
 import astropy.constants as c
 import numpy as np
-import astropy.io.fits as pyfits
+from astropy.io import fits
 import matplotlib.pyplot as plt
+import saha_eos as eos
+from scipy.interpolate import RectBivariateSpline
+from scipy.special import voigt_profile
 plt.ion()
 
 """
@@ -15,6 +18,9 @@ https://chiantipy.readthedocs.io/en/latest/
 https://chianti-atomic.github.io/api/ChiantiPy.core.html#id91
 http://spiff.rit.edu/classes/phys370/lectures/statstar/statstar_python3.py
 
+
+import saha_eos as eos
+_ = a = eos.P_T_tables(None, None, savefile='saha_eos.fits')
 """
 
 #From OCR online, from https://articles.adsabs.harvard.edu/pdf/1988A%26A...193..189J
@@ -29,6 +35,176 @@ Hmff_table = np.array(
 Hff_const = np.sqrt(32*np.pi)/3/np.sqrt(3)*(c.e.esu**6/c.c/c.h/(c.k_B*c.m_e**3*u.K)**(1/2)/(1*u.Hz)**3).to(u.cm**5).value
 h_kB_cgs = (c.h/c.k_B).cgs.value
 H_excitation_T = (13.595*u.eV/c.k_B).cgs.value
+f_const = (np.pi*c.e.gauss**2/c.m_e/c.c).cgs.value  # Used in line calcs.
+ev_kB_cgs = (1*u.eV/c.k_B).cgs.value
+
+ #Element abundances
+abund, masses, n_p, ionI, ionII, gI, gII, gIII, elt_names = eos.solarmet()
+nelt = len(abund)
+# Read on strong_lines and weak_lines files
+strong_lines = fits.getdata('strong_lines.fits',1)
+strong_nu = c.c.to(u.AA/u.s).value/strong_lines['wavelength']
+weak_lines = fits.getdata('weak_lines.fits',1)
+weak_nu = c.c.to(u.AA/u.s).value/weak_lines['wavelength']
+
+# Create indices of each element and ion in weak_lines
+line_elts = np.unique(weak_lines['element_name'])
+neutral_indices = {}
+ion_indices = {}
+for name in line_elts:
+    neutral_indices[name] = np.where((weak_lines['element_name'] == name) & (weak_lines['ion_state']==1))[0]
+    ion_indices[name] = np.where((weak_lines['element_name'] == name) & (weak_lines['ion_state']==2))[0]
+
+# Read in the equation of state and make the relevant 2D interpolation functions
+f_eos = fits.open('saha_eos.fits')
+h = f_eos[0].header
+Ts = h['CRVAL1'] + np.arange(h['NAXIS1'])*h['CDELT1']
+Ps_log10 = h['CRVAL2'] + np.arange(h['NAXIS2'])*h['CDELT2']
+rho = f_eos['rho [g/cm**3]'].data
+ns = f_eos['ns [cm^-3]'].data
+ne_table = f_eos['n_e [cm^-3]'].data
+
+# Create 2D interpolation functions for each element/ion species in ns
+# ns has shape (len(Ps_log10), len(Ts), number_of_elements)
+number_of_elements = ns.shape[2]
+ns_func = []
+for i in range(number_of_elements):
+    # Create 2D interpolation function for element i
+    # RectBivariateSpline expects (x, y, z) where z[i,j] = f(x[i], y[j])
+    # We need to transpose ns[:,:,i] since it's in (P, T) order
+    interp_func = RectBivariateSpline(Ps_log10, Ts, ns[:,:,i])
+    ns_func.append(interp_func)
+ne_func = RectBivariateSpline(Ps_log10, Ts, ne_table)
+
+def weak_line_kappa(nu0, dlnu, N_nu, log10P, T, microturb=2.0):
+    """ For all atomic and ion species, compute the weak line opacities.
+    nu0: Start frequency in Hz
+    dlnu: delta log(nu)
+    N_nu: number of frequencies
+    log10P: Log10 of pressure in dyne/cm^2
+    T: Temperature in K
+    microturb: Microturbulence parameter (default is 2.0 km/s)
+    """
+    kappa = np.zeros(N_nu)
+    max_nu = nu0 * np.exp(dlnu * (N_nu - 1))
+    # Loop through all elements
+    for name in line_elts:
+        for ion_state in [1,2]:
+            this_kappa = np.zeros_like(kappa)
+            if ion_state == 1 and name in neutral_indices:
+                indices = neutral_indices[name]
+            elif ion_state == 2 and name in ion_indices:
+                indices = ion_indices[name]
+            else:
+                continue
+            # Remove lines outside our wavelength range 
+            indices = indices[(nu0<weak_nu[indices]) & (weak_nu[indices]<max_nu)]
+            if len(indices) == 0:
+                continue
+
+            # Compute the index of the weak_nu
+            weak_ix = (np.log(weak_nu[indices]) - np.log(nu0))/dlnu
+            weak_ix0 = np.clip(weak_ix, 0, N_nu-2).astype(int)
+            weak_frac = weak_ix - weak_ix0
+
+            # Number density
+            elt_ix = np.where(elt_names == name)[0][0]
+            if ion_state == 1:
+                n = ns_func[3*elt_ix](log10P, T)[0][0]
+            elif ion_state == 2:
+                n = ns_func[3*elt_ix + 1](log10P, T)[0][0]
+
+            # Opacity
+            kappa_tot = n * f_const * 10**weak_lines['log_gf'][indices] * np.exp(-weak_lines['excitation'][indices]*ev_kB_cgs/T)*(1-np.exp(-h_kB_cgs*weak_nu[indices]/T)) / weak_nu[indices]
+            # A fast vectorised way to add all kappa values
+            np.add.at(this_kappa, weak_ix0, (1 - weak_frac) * kappa_tot)
+            np.add.at(this_kappa, weak_ix0+1, weak_frac * kappa_tot)
+
+            # Compute the line width, in units of the grid spacing.
+            elt_ix = np.where(elt_names == name)[0]
+            line_width = np.sqrt(2*(c.k_B* T*u.K) / (masses[elt_ix]*u.u)).to(u.km/u.s).value
+            line_width = np.sqrt(line_width**2 + microturb**2)
+            grid_line_width = line_width/c.c.to(u.km/u.s).value/dlnu
+            
+            #Offsets of up to +/- 3 sigma
+            offsets = np.arange(-int(3*grid_line_width)-1, int(3*grid_line_width)+2)
+            #A Gaussian kernel
+            gaussian_kernel = np.exp(-(offsets / grid_line_width)**2)
+            # Normalize the kernel
+            gaussian_kernel /= np.sum(gaussian_kernel)*dlnu
+            
+            # Convolve the opacity with the Gaussian kernel
+            kappa += np.convolve(this_kappa, gaussian_kernel, mode='same')
+            
+    return kappa
+
+def strong_line_kappa(nu0, dlnu, N_nu, log10P, T, microturb=2.0):
+    """ For all atomic and ion species, compute the strong line opacities.
+    nu0: Start frequency in Hz
+    dlnu: delta log(nu)
+    N_nu: number of frequencies
+    log10P: Log10 of pressure in dyne/cm^2
+    T: Temperature in K
+    microturb: Microturbulence parameter (default is 2.0 km/s)
+    """
+    nu = np.exp(np.linspace(np.log(nu0), np.log(nu0 * np.exp(dlnu * N_nu)), N_nu))
+    kappa = np.zeros(N_nu)
+    max_nu = nu0 * np.exp(dlnu * (N_nu - 1))
+    
+    # Get unique elements and ions from strong_lines
+    strong_line_elts = np.unique(strong_lines['element_name'])
+    
+    # Find the current n_e and N_H (needed for broadening)
+    n_e = ne_func(log10P, T)[0][0]
+    n_H = ns_func[0](log10P, T)[0][0]
+
+    # Loop through all elements
+    for name in strong_line_elts:
+        for ion_state in [1, 2]:
+            # Find indices for this element and ion state
+            indices = np.where((strong_lines['element_name'] == name) & 
+                             (strong_lines['ion_state'] == ion_state))[0]
+            
+            # Remove lines outside our wavelength range 
+            indices = indices[(nu0 < strong_nu[indices]) & (strong_nu[indices] < max_nu)]
+            if len(indices) == 0:
+                continue
+            
+            # Get element index for number density lookup
+            elt_ix = np.where(elt_names == name)[0][0]
+            
+            # Number density
+            if ion_state == 1:
+                n = ns_func[3*elt_ix](log10P, T)[0][0]
+            elif ion_state == 2:
+                n = ns_func[3*elt_ix + 1](log10P, T)[0][0]
+            
+            # Loop through all lines for this element/ion
+            for idx in indices:
+                line_nu = strong_nu[idx]
+                
+                # We need the Doppler velocity width converted to a 
+                # frequency width and the Lorentzian width.
+                doppler_v = np.sqrt(2*(c.k_B* T*u.K) / (masses[elt_ix]*u.u)).to(u.km/u.s).value
+                doppler_v = np.sqrt(doppler_v**2 + microturb**2)
+                doppler_dnu = (doppler_v / c.c.to(u.km/u.s).value) * line_nu
+                # Compute Gamma. ignore van der Waals for now strong_lines['waals'][idx]
+                Gamma = 10**(strong_lines['rad'][idx])
+                if (elt_ix == 0 and ion_state == 1):
+                    Gamma += n_e * 1e-3 #Completely made up! Hydrogen is specially treated in VALD3
+                elif (strong_lines['stark'][idx] != 0):
+                    Gamma += n_e * 10**strong_lines['stark'][idx]
+                this_kappa = n * f_const * 10**strong_lines['log_gf'][idx] * np.exp(-strong_lines['excitation'][idx]*ev_kB_cgs/T)*(1-np.exp(-h_kB_cgs*strong_nu[idx]/T))
+                this_kappa *= voigt_profile(nu - line_nu, doppler_dnu/np.sqrt(2), Gamma)
+                
+                #if (name == 'Ca' and ion_state == 2):
+                #    import pdb; pdb.set_trace()
+                #if (name == 'H'):
+                #    import pdb; pdb.set_trace()
+                # Add the opacity to the kappa array
+                kappa += this_kappa
+
+    return kappa
 
 def Hmbf(nu, T):
 	"""Compute the Hydrogen minus bound-free cross sections in cgs units as a
@@ -123,30 +299,26 @@ if __name__=="__main__":
 	dnu = 1e13
 	plt.clf()
 	nu = dnu*np.arange(1000) + dnu/2
-	f = pyfits.open('rho_Ui_mu_ns_ne.fits')
-	h = f[0].header
-	natoms = f['ns'].data.shape[2]//3
-	Ts = h['CRVAL1'] + np.arange(h['NAXIS1'])*h['CDELT1']
-	Ps_log10 = h['CRVAL2'] + np.arange(h['NAXIS2'])*h['CDELT2']
+	natoms = f_eos['ns'].data.shape[2]//3
 	kappa_bar_Planck = np.zeros_like(f[0].data)
 	kappa_bar_Ross = np.zeros_like(f[0].data)
 	for i, P_log10 in enumerate(Ps_log10):
 		for j, T in enumerate(Ts):
-			nHI = f['ns'].data[i,j,0]
-			nHII = f['ns'].data[i,j,1]
-			nHm = f['ns'].data[i,j,2]
-			ne = f['n_e'].data[i,j]
+			nHI = f_eos['ns'].data[i,j,0]
+			nHII = f_eos['ns'].data[i,j,1]
+			nHm = f_eos['ns'].data[i,j,2]
+			ne = f_eos['n_e'].data[i,j]
 			#Compute the volume-weighted absorption coefficient
 			kappa = kappa_cont(nu, T, nHI, nHII, nHm, ne)
 			#Now compute the Rosseland and Planck means.
 			Bnu = nu**3/(np.exp(h_kB_cgs*nu/T)-1)
 			dBnu = nu**4 * np.exp(h_kB_cgs*nu/T)/(np.exp(h_kB_cgs*nu/T)-1)**2
-			kappa_bar_Planck[i,j] = np.sum(kappa*Bnu)/np.sum(Bnu)/f[0].data[i,j]
-			kappa_bar_Ross[i,j] = 1/(np.sum(dBnu/kappa)/np.sum(dBnu))/f[0].data[i,j]
+			kappa_bar_Planck[i,j] = np.sum(kappa*Bnu)/np.sum(Bnu)/rho[i,j]
+			kappa_bar_Ross[i,j] = 1/(np.sum(dBnu/kappa)/np.sum(dBnu))/rho[i,j]
 			if (i==30): #This is log_10(P)=3.5 - similar to solar photosphere.
 				if ((j < 18) & (j % 2 == 0)):
-					plt.loglog(3e8/nu, kappa/f[0].data[i,j], label=f'T={T}K')
-	hdu1 = pyfits.PrimaryHDU(kappa_bar_Ross)
+					plt.loglog(3e8/nu, kappa/rho[i,j], label=f'T={T}K')
+	hdu1 = fits.PrimaryHDU(kappa_bar_Ross)
 	hdu1.header['CRVAL1'] = Ts[0]
 	hdu1.header['CDELT1'] = Ts[1]-Ts[0]
 	hdu1.header['CTYPE1'] = 'Temperature [K]'
@@ -154,9 +326,9 @@ if __name__=="__main__":
 	hdu1.header['CDELT2'] = Ps_log10[1]-Ps_log10[0]
 	hdu1.header['CTYPE2'] = 'log10(pressure) [dyne/cm^2]'
 	hdu1.header['EXTNAME'] = 'kappa_Ross [cm**2/g]'
-	hdu2 = pyfits.ImageHDU(kappa_bar_Planck)
+	hdu2 = fits.ImageHDU(kappa_bar_Planck)
 	hdu2.header['EXTNAME'] = 'kappa_Planck [cm**2/g]'
-	hdulist = pyfits.HDUList([hdu1, hdu2])
+	hdulist = fits.HDUList([hdu1, hdu2])
 	hdulist.writeto('Ross_Planck_opac.fits', overwrite=True)
 	plt.legend()
 	plt.xlabel('Wavelength [m]')

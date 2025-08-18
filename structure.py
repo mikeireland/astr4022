@@ -22,12 +22,12 @@ from scipy.special import expn
 from strontium_barium import *
 plt.ion()
 
-Teff = 5777 # K 
+Teff = 8777 # K 
 g = 27400   # cm/s^2
 
 # Set to 1.3 to limit T due to the onset of convection.
 # If set to 2.0, there is no effect.
-convective_cutoff = 2.0
+convective_cutoff = 2.0 #1.3
 
 # Load the opacity table for Rosseland mean.
 f_opac = pyfits.open('Ross_Planck_opac.fits')

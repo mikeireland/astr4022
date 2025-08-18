@@ -20,7 +20,7 @@ from scipy.integrate import cumulative_trapezoid
 from scipy.special import expn
 
 #From earlier in the course
-import saha_only as saha
+import saha_eos as saha
 
 #Our stellar parameters
 logg = 1.7

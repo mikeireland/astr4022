@@ -28,7 +28,7 @@ C: From 61981 cm^-1
 N: From 83317
 S: From 55330
 """
-from saha_only import *
+from saha_eos import *
 import astropy.units as u
 import astropy.constants as c
 from labellines import labelLines
