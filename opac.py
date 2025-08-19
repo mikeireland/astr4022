@@ -111,11 +111,13 @@ def weak_line_kappa(nu0, dlnu, N_nu, log10P, T, microturb=2.0):
             elt_ix = np.where(elt_names == name)[0][0]
             if ion_state == 1:
                 n = ns_func[3*elt_ix](log10P, T)[0][0]
+                Zpart = gI[elt_ix]
             elif ion_state == 2:
                 n = ns_func[3*elt_ix + 1](log10P, T)[0][0]
+                Zpart = gII[elt_ix]
 
             # Opacity
-            kappa_tot = n * f_const * 10**weak_lines['log_gf'][indices] * np.exp(-weak_lines['excitation'][indices]*ev_kB_cgs/T)*(1-np.exp(-h_kB_cgs*weak_nu[indices]/T)) / weak_nu[indices]
+            kappa_tot = n * f_const * 10**weak_lines['log_gf'][indices] * np.exp(-weak_lines['excitation'][indices]*ev_kB_cgs/T)*(1-np.exp(-h_kB_cgs*weak_nu[indices]/T)) / weak_nu[indices] / Zpart
             # A fast vectorised way to add all kappa values
             np.add.at(this_kappa, weak_ix0, (1 - weak_frac) * kappa_tot)
             np.add.at(this_kappa, weak_ix0+1, weak_frac * kappa_tot)
@@ -176,8 +178,11 @@ def strong_line_kappa(nu0, dlnu, N_nu, log10P, T, microturb=2.0):
             # Number density
             if ion_state == 1:
                 n = ns_func[3*elt_ix](log10P, T)[0][0]
+                Zpart = gI[elt_ix]
             elif ion_state == 2:
                 n = ns_func[3*elt_ix + 1](log10P, T)[0][0]
+                Zpart = gII[elt_ix]
+            print(Zpart)
             
             # Loop through all lines for this element/ion
             for idx in indices:
@@ -194,7 +199,7 @@ def strong_line_kappa(nu0, dlnu, N_nu, log10P, T, microturb=2.0):
                     Gamma += n_e * 1e-3 #Completely made up! Hydrogen is specially treated in VALD3
                 elif (strong_lines['stark'][idx] != 0):
                     Gamma += n_e * 10**strong_lines['stark'][idx]
-                this_kappa = n * f_const * 10**strong_lines['log_gf'][idx] * np.exp(-strong_lines['excitation'][idx]*ev_kB_cgs/T)*(1-np.exp(-h_kB_cgs*strong_nu[idx]/T))
+                this_kappa = n * f_const * 10**strong_lines['log_gf'][idx] * np.exp(-strong_lines['excitation'][idx]*ev_kB_cgs/T)*(1-np.exp(-h_kB_cgs*strong_nu[idx]/T)) / Zpart
                 this_kappa *= voigt_profile(nu - line_nu, doppler_dnu/np.sqrt(2), Gamma)
                 
                 #if (name == 'Ca' and ion_state == 2):
