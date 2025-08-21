@@ -337,15 +337,15 @@ if __name__=="__main__":
     dnu = 1e13
     plt.clf()
     nu = dnu*np.arange(1000) + dnu/2
-    natoms = f_eos['ns'].data.shape[2]//3
+    natoms = f_eos['ns [cm^-3]'].data.shape[2]//3
     kappa_bar_Planck = np.zeros_like(f[0].data)
     kappa_bar_Ross = np.zeros_like(f[0].data)
     for i, P_log10 in enumerate(Ps_log10):
         for j, T in enumerate(Ts):
-            nHI = f_eos['ns'].data[i,j,0]
-            nHII = f_eos['ns'].data[i,j,1]
-            nHm = f_eos['ns'].data[i,j,2]
-            ne = f_eos['n_e'].data[i,j]
+            nHI = f_eos['ns [cm^-3]'].data[i,j,0]
+            nHII = f_eos['ns [cm^-3]'].data[i,j,1]
+            nHm = f_eos['ns [cm^-3]'].data[i,j,2]
+            ne = f_eos['n_e [cm^-3]'].data[i,j]
             #Compute the volume-weighted absorption coefficient, using Hydrogen
             kappa = kappa_cont_H(nu, T, nHI, nHII, nHm, ne)
             #Now compute the Rosseland and Planck means.

@@ -22,7 +22,7 @@ from scipy.special import expn
 from strontium_barium import *
 plt.ion()
 
-Teff = 6850 # K #4850 is the lowest. 9000 is the highest that makes sense.
+Teff = 8850 # K #4850 is the lowest. 9000 is the highest that makes sense.
 g = 27400  # cm/s^2
 P0 = 10 # Initial pressure in dyn/cm^2
 # Set to 1.3 to limit T due to the onset of convection.
@@ -149,6 +149,7 @@ H_all = compute_H(wave_nm*u.nm, Ts, tau_grid, kappa_all_nu_bars, kappa_bars)
 # Add in a macroturbulence and rotation convolution. 
 # 43 is WiFeS. 2.0 is a perfect spectrograph.
 macroturb = 43.0 
+macroturb = 2.0
 width = macroturb / 3e5 / dlnu
 g_macro = np.exp(-(np.arange(-int(2.5*width), int(2.5*width)+1)**2)/width**2)
 H_all = np.convolve(H_all, g_macro/np.sum(g_macro), mode='same')
