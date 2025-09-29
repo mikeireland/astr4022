@@ -33,7 +33,9 @@ prl_grid = -10 * np.ones(len(tau_grid))
 #Derived parameters
 g = 10**logg * u.cm/u.s**2
 
-#Load in the tables
+#Load in the tables. This comes from the CODEX models, which have various
+#sources of opacity included. Documented somewhat in:
+# https://github.com/mikeireland/codex2
 archive = np.load('chi_mu_T_prl.npz')
 chi_bar_l = archive['arr_0']
 mu = archive['arr_1']
@@ -179,5 +181,6 @@ plt.plot(wave, Flambda, label='Short Char. Explicit')
 plt.plot(wave, Flambda_trapz, label='Trapezoidal')
 plt.xlabel('Wavelength (nm)')
 plt.ylabel(r'F$_\lambda$ (W/m$^2$/nm)')
+plt.legend()
 plt.tight_layout()
 
