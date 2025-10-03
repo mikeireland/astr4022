@@ -40,7 +40,7 @@ ax1.set_xlabel('x')
 ax1.set_ylabel('y')
 
 # Time-stepping parameters
-dt = 0.1
+dt = 0.02
 nt = 800
 
 # Set up figure 2 for the animation
@@ -64,7 +64,7 @@ def update(frame):
     ax2.set_ylabel('y') 
     return c2.collections   
 
-ani = FuncAnimation(fig2, update, frames=nt//10, blit=False, interval=50, repeat=False)
-plt.show()
+#ani = FuncAnimation(fig2, update, frames=nt//10, blit=False, interval=50, repeat=False)
+#plt.show()
 # To save the animation, uncomment the following line
 # ani.save('advection2D.mp4', writer='ffmpeg', fps=30
